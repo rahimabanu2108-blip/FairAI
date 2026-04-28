@@ -738,7 +738,6 @@
 
   <script>
     let currentState = {};
-    let conversationHistory = [];
 
     function updateDisplay(field, value) {
       document.getElementById(field + '_display').textContent = value;
@@ -936,42 +935,114 @@ RESPONSE GUIDELINES:
       const thinkingMessage = appendMessage('thinking', '<div class="typing-dots"><span></span><span></span><span></span></div>');
       document.getElementById('send_button').disabled = true;
 
-      conversationHistory.push({ role: 'user', content: message });
+      // Simulate AI thinking delay
+      await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 1200));
 
-      try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'anthropic-version': '2023-06-01',
-            'anthropic-dangerous-direct-browser-access': 'true'
-          },
-          body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 500,
-            system: getSystemPrompt(),
-            messages: conversationHistory
-          })
-        });
-
-        const data = await response.json();
-        thinkingMessage.remove();
-
-        if (data.error) {
-          appendMessage('bot', '❌ Error: ' + data.error.message);
-          conversationHistory.pop();
-        } else {
-          const reply = data.content[0].text;
-          appendMessage('bot', reply.replace(/\n/g, '<br>'));
-          conversationHistory.push({ role: 'assistant', content: reply });
-        }
-      } catch (error) {
-        thinkingMessage.remove();
-        appendMessage('bot', '❌ Network error. Please try again.');
-        conversationHistory.pop();
-      }
+      const reply = generateResponse(message.toLowerCase());
+      thinkingMessage.remove();
+      appendMessage('bot', reply);
 
       document.getElementById('send_button').disabled = false;
+    }
+
+    function generateResponse(message) {
+      const { approved, score, credit, loan, income, dpDiff, trustScore, education } = currentState;
+      const percentage = (score * 100).toFixed(1);
+
+      // Approval/Rejection questions
+      if (message.includes('why') && (message.includes('approve') || message.includes('reject'))) {
+        if (approved) {
+          if (credit >= 750 && income >= 70000) {
+            return `You were approved because of your strong financial profile. Your credit score of ${credit} is excellent, and your income of $${income.toLocaleString()} demonstrates solid repayment capacity. The approval probability was ${percentage}%.`;
+          } else {
+            return `You were approved with ${percentage}% probability. Key factors: Your credit score (${credit}) meets requirements, and your loan-to-income ratio is reasonable. While there's room for improvement, you qualify for this loan.`;
+          }
+        } else {
+          if (credit < 600) {
+            return `Unfortunately, you were rejected primarily due to your credit score of ${credit}, which is below our threshold. Improving your credit score to at least 650 would significantly increase your chances. Current approval probability: ${percentage}%.`;
+          } else if (loan > income * 0.6) {
+            return `You were rejected because the loan amount ($${loan.toLocaleString()}) is too high relative to your income ($${income.toLocaleString()}). Try reducing the loan amount by 25-30% or demonstrating higher income.`;
+          } else {
+            return `You were rejected with only ${percentage}% approval probability. The main issues are: credit score (${credit}) and loan-to-income ratio. Improving either metric would help significantly.`;
+          }
+        }
+      }
+
+      // Bias questions
+      if (message.includes('bias') || message.includes('fair') || message.includes('discriminat')) {
+        if (dpDiff > 0.07) {
+          return `I detected potential bias in this decision. The demographic parity difference is ${dpDiff.toFixed(3)}, which exceeds our fairness threshold of 0.07. This suggests the model may be treating different groups unequally. I recommend reviewing this decision with human oversight.`;
+        } else {
+          return `No significant bias detected. The demographic parity difference is ${dpDiff.toFixed(3)}, which is below our 0.07 threshold. The decision appears fair and based on legitimate financial factors like credit score, income, and loan amount.`;
+        }
+      }
+
+      // Improvement questions
+      if (message.includes('improve') || message.includes('better') || message.includes('increase') || message.includes('how can')) {
+        const suggestions = [];
+        if (credit < 750) {
+          suggestions.push(`🔸 Raise your credit score from ${credit} to 750+ (biggest impact: +${Math.min(15, Math.round((750 - credit) / 10))}%)`);
+        }
+        if (loan > 20000) {
+          suggestions.push(`🔸 Reduce loan amount from $${loan.toLocaleString()} to $${(loan * 0.7).toLocaleString()} or less (+${Math.min(12, Math.round(loan / 2500))}%)`);
+        }
+        if (income < 80000) {
+          suggestions.push(`🔸 Demonstrate income growth or additional income sources (+${Math.min(10, Math.round((80000 - income) / 8000))}%)`);
+        }
+        if (education < 2) {
+          suggestions.push(`🔸 Complete additional education/certifications (+3-5%)`);
+        }
+
+        if (suggestions.length === 0) {
+          return `Your profile is already strong! With ${percentage}% approval probability, you're in good shape. Minor optimizations could include maintaining excellent credit and demonstrating stable income.`;
+        }
+
+        return `Here's how to improve your chances:<br><br>${suggestions.join('<br>')}`;
+      }
+
+      // Trust score questions
+      if (message.includes('trust') || message.includes('confidence')) {
+        return `Your AI trust score is ${trustScore}%, which combines model confidence (${percentage}%) with fairness metrics. ${trustScore >= 80 ? 'This is a high-confidence, fair decision.' : trustScore >= 60 ? 'This is a moderate-confidence decision with acceptable fairness.' : 'This decision has lower confidence and may need human review.'}`;
+      }
+
+      // Credit score questions
+      if (message.includes('credit score') || message.includes('credit')) {
+        if (credit >= 750) {
+          return `Your credit score of ${credit} is excellent! This is one of your strongest assets and contributes ~45% to the decision weight. Maintain it by paying bills on time and keeping credit utilization low.`;
+        } else if (credit >= 650) {
+          return `Your credit score of ${credit} is acceptable but could be better. Improving it to 750+ would significantly boost your approval chances. Focus on timely payments and reducing credit card balances.`;
+        } else {
+          return `Your credit score of ${credit} is the main concern. This heavily impacts the decision (~45% weight). I recommend: paying down debts, disputing errors on your credit report, and avoiding new credit applications.`;
+        }
+      }
+
+      // Income questions
+      if (message.includes('income') || message.includes('salary')) {
+        return `Your annual income of $${income.toLocaleString()} contributes ~30% to the decision. ${income >= 80000 ? 'This is strong and shows good repayment capacity.' : 'Increasing documented income or showing consistent income growth would help.'} The model evaluates debt-to-income ratio carefully.`;
+      }
+
+      // Loan amount questions
+      if (message.includes('loan amount') || message.includes('how much')) {
+        const ratio = ((loan / income) * 100).toFixed(1);
+        return `You're requesting $${loan.toLocaleString()}, which is ${ratio}% of your annual income. ${ratio < 30 ? 'This is a healthy ratio.' : ratio < 50 ? 'This ratio is moderate.' : 'This is a high ratio and raises concerns.'} Loan amount contributes ~20% weight to the decision (negative correlation).`;
+      }
+
+      // Model/algorithm questions
+      if (message.includes('model') || message.includes('algorithm') || message.includes('how does')) {
+        return `I use ${currentState.model}, which analyzes 6 features: Credit Score (45% weight), Income (30%), Loan Amount (20%), Education (5%), plus Age and Gender for fairness monitoring. The model was trained on historical data and is regularly audited for bias.`;
+      }
+
+      // Generic questions
+      if (message.includes('hello') || message.includes('hi') || message.includes('hey')) {
+        return `Hello! I'm here to explain your loan decision and answer any questions. Feel free to ask about approval reasons, bias detection, or improvement strategies.`;
+      }
+
+      if (message.includes('thank')) {
+        return `You're welcome! Let me know if you have any other questions about your loan application or the decision process.`;
+      }
+
+      // Default response
+      return `I can help you understand your ${approved ? 'approval' : 'rejection'} (${percentage}% probability). Ask me about:<br>• Why the decision was made<br>• Whether bias was detected<br>• How to improve your chances<br>• Specific factors like credit score or income`;
     }
 
     // Initialize on load
